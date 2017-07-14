@@ -5,3 +5,4 @@ This data can also be queried using Hive external table schema.
 
 Custom Scrapy crawler, can parse each review using an Avro schema and store them in Hdfs using Avro format. Again, this data can be queried using Hive. Crawler is written in Python and primarily uses xpath along with advanced features like user-agent spoofing and IP rotation. It uses a native Kafka client (as Kafka producer) which is also supplied by Confluent.
 
+Attached are AWS EC2 shell commands, package configuration and Python code pasted in consolidated text files. 
