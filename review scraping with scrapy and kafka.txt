@@ -1,0 +1,306 @@
+sudo su
+pip install --upgrade pip
+mkdir webScrape
+cd webScrape
+
+#create scrapy project
+scrapy startproject review1
+cd review1
+
+#design spider core logic
+vi review1/spiders/reviews_spider.py
+...
+import scrapy
+from scrapy.selector import Selector
+
+class QuotesSpider(scrapy.Spider):
+    name = "reviews"
+
+    def __init__(self, max_reviews=30):
+        if max_reviews:
+            self.max_count = max_reviews
+        self.counter = 0
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        settings = crawler.settings
+        return cls(settings.get('MAX_REVIEWS'))
+
+    def start_requests(self):
+        urls = [
+            'https://www.amazon.com/product-reviews/B00OQVZDJM?pageNumber=1',
+#            'http://quotes.toscrape.com/page/2/',
+        ]
+        for url in urls:
+            yield scrapy.Request(url=url, callback=self.parse)
+
+    def parse(self, response):
+        def process_rev(tag):
+#       remove <br/> tag; [0] unlists results before further processing
+#       review may have only images without any text
+                if tag:
+                        t = Selector(text = tag).xpath('//text()').extract()[0]
+                        if(len(t) > 1):
+                                return ' '.join(t)
+                        else:
+                                return t
+                else:
+                        return tag
+
+        review_nodes = response.xpath('//*[@data-hook = "review"]').extract()
+        for rev in review_nodes:
+#       Note: Selector() adds 2 tag levels to content; [0] unlists results before further processing
+                author = Selector(text = rev).xpath('/*/*/*/*/*/*/*[@data-hook = "review-author"]').extract()[0]
+                date = Selector(text = rev).xpath('/*/*/*/*/*/*[@data-hook = "review-date"]/text()').extract()[0][3:]
+                title = Selector(text = rev).xpath('/*/*/*/*/*/*[@data-hook = "review-title"]').extract()[0]
+                rating = Selector(text = rev).xpath('/*/*/*/*/*/*[substring(@title, string-length(@title) - string-length("out of 5 stars") +1) = "out of 5 stars"]/@title').extract()[0][0:3]
+                text = Selector(text = rev).xpath('/*/*/*/*/*/*[@data-hook = "review-body"]').extract()[0]
+
+                author = process_rev(author)
+                title = process_rev(title)
+                text = process_rev(text)
+                self.counter += 1
+
+                self.log('id: %s' % self.counter)
+#                self.log('author: %s' % author)
+#                self.log('date: %s' % date)
+#                self.log('title: %s' % title)
+#                self.log('rating: %s' % rating)
+#                self.log('text: %s' % text)
+
+                yield{
+                        'id': self.counter,
+                        'author': author,
+                        'date': date,
+                        'title': title,
+                        'rating': rating,
+                        'text': text
+                }
+
+#[0] unlists results before further processing
+        next_page = response.xpath('//*[@class = "a-last"]/a')[0]
+        if(self.counter < self.max_count):
+             yield response.follow(next_page, callback = self.parse)
+...
+
+#Setup user-agent spoofing and proxy IP rotation
+cd ..
+vi review1/middlewares.py
+...
+from scrapy import signals
+import random
+from scrapy.conf import settings
+import base64
+...
+class RandomUserAgentMiddleware(object):
+    def process_request(self, request, spider):
+        ua  = random.choice(settings.get('USER_AGENT_LIST'))
+        if ua:
+            request.headers.setdefault('User-Agent', ua)
+
+class RandomProxy(object):
+    # overwrite process request
+    def process_request(self, request, spider):
+        # Set the location of the proxy
+        p = random.choice(settings.get('PROXY_LIST'))
+        if p:
+            request.meta['proxy'] = p
+
+        # Use the following lines if your proxy requires authentication
+        proxy_user_pass = settings.get('PROXY_CREDENTIALS')
+        # setup basic authentication for the proxy
+        encoded_user_pass = base64.b64encode(proxy_user_pass)
+        request.headers['Proxy-Authorization'] = 'Basic ' + encoded_user_pass
+...
+
+#Edit scraper global settings, initialize configuration and credentials
+vi review1/settings.py
+...
+USER_AGENT_LIST = [
+    'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.7 (KHTML, like Gecko) Chrome/16.0.912.36 Safari/535.7',
+    'Mozilla/5.0 (Windows NT 6.2; Win64; x64; rv:16.0) Gecko/16.0 Firefox/16.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_3) AppleWebKit/534.55.3 (KHTML, like Gecko) Version/5.1.3 Safari/534.53.10'
+]
+
+# Enable or disable downloader middlewares
+# See http://scrapy.readthedocs.org/en/latest/topics/downloader-middleware.html
+DOWNLOADER_MIDDLEWARES = {
+    'review1.middlewares.RandomUserAgentMiddleware': 80,
+    'scrapy.downloadermiddlewares.retry.RetryMiddleware': 90,
+    'review1.middlewares.RandomProxy': 100,
+    'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware': 110,
+}
+
+# Configure item pipelines
+# See http://scrapy.readthedocs.org/en/latest/topics/item-pipeline.html
+ITEM_PIPELINES = {
+    'review1.pipelines.Review1Pipeline': 300,
+}
+
+# Retry many times since proxies often fail
+RETRY_TIMES = 10
+# Retry on most error codes since proxies fail for different reasons
+RETRY_HTTP_CODES = [500, 503, 504, 400, 403, 404, 408]
+
+#proxy service by proxybonanza.com (paid service)
+PROXY_LIST = [
+    '107.175.42.134:60099',
+    '107.175.42.135:60099',
+    '107.175.42.136:60099',
+    '107.175.42.139:60099',
+    '107.175.42.140:60099',
+    '107.175.42.142:60099',
+    '107.175.42.143:60099',
+    '107.175.42.145:60099',
+    '107.175.42.149:60099',
+    '107.175.42.152:60099',
+    '107.175.42.154:60099',
+    '107.175.42.157:60099',
+    '107.175.42.161:60099',
+    '107.175.42.162:60099',
+    '107.175.42.167:60099',
+    '107.175.42.168:60099',
+    '107.175.42.169:60099',
+    '107.175.42.170:60099',
+    '107.175.42.172:60099',
+    '107.175.42.182:60099',
+    '107.175.42.184:60099',
+    '107.175.42.185:60099',
+    '107.175.42.188:60099',
+    '107.175.42.189:60099',
+    '107.175.42.190:60099',
+]
+
+PROXY_CREDENTIALS = 'xxxxxxxxxxxxx:xxxxxxxx'
+
+MAX_REVIEWS = 45000
+...
+
+#Confluent Kafka Python client setup
+git clone https://github.com/edenhill/librdkafka.git
+cd librdkafka
+./configure
+make
+make install
+pip install confluent-kafka
+pip install confluent-kafka[avro]
+cd review1
+
+#define item pipeline to send message using Kafka producer, after each set is scraped
+vi pipelines.py
+...
+# Define your item pipelines here
+# Don't forget to add your pipeline to the ITEM_PIPELINES setting
+# See: http://doc.scrapy.org/en/latest/topics/item-pipeline.html
+
+from confluent_kafka import avro
+from confluent_kafka.avro import AvroProducer
+
+class Review1Pipeline(object):
+
+    def __init__(self, k_hosts, schema_registry, value_schema, topic):
+        self.k_hosts = k_hosts
+        self.schema_registry = schema_registry
+        self.value_schema = value_schema
+        self.topic = topic
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(
+                k_hosts = crawler.settings.get('SCRAPY_KAFKA_HOSTS', 'localhost'),
+                schema_registry = crawler.settings.get('SCHEMA_REGISTRY_URL', 'http://localhost:8081'),
+                value_schema = avro.load(crawler.settings.get('SCRAPY_KAFKA_AVRO_SCHEMA', 'ReviewValueSchema.avsc')),
+                topic = crawler.settings.get('SCRAPY_KAFKA_ITEM_PIPELINE_TOPIC', 'review2')
+        )
+
+    def open_spider(self, spider):
+        self.avroProducer = AvroProducer({'bootstrap.servers': self.k_hosts, 'schema.registry.url': self.schema_registry}, default_value_schema = self.value_schema)
+
+    def close_spider(self, spider):
+#send/commit all messages to broker
+        self.avroProducer.flush()
+
+    def process_item(self, item, spider):
+        self.avroProducer.produce(topic = self.topic, value = item)
+...
+
+#create schema for parsing message to Avro format
+cd ..
+vi ReviewValueSchema.avsc
+...
+{
+    "type": "record",
+    "name": "review",
+    "fields": [
+        {"name": "id", "type": "int"},
+        {"name": "author", "type": "string"},
+        {"name": "date", "type": "string"},
+        {"name": "title", "type": "string"},
+        {"name": "rating", "type": "float"},
+        {"name": "text", "type": "string"}
+    ]
+}
+...
+
+vi ~/.bashrc
+...
+# for librdkafka.so.1 file, used by Kafka Python client
+export LD_LIBRARY_PATH=/usr/local/lib
+...
+
+#Kafka hdfs/hive sink connector setup
+vi /etc/kafka-connect-hdfs/quickstart-hdfs.properties
+...
+name=hdfs-sink
+connector.class=io.confluent.connect.hdfs.HdfsSinkConnector
+tasks.max=1
+topics=review2
+hdfs.url=hdfs://localhost:9000
+flush.size=100
+hive.integration=true
+hive.metastore.uris=thrift://localhost:9083
+schema.compatibility=BACKWARD
+...
+
+#Application execution
+su hdp
+/home/hadoop*/sbin/start-dfs.sh
+exit
+nohup /home/ec2-user/apache-hive-2.1.1-bin/bin/hive --service metastore &
+/usr/bin/kafka-server-start /etc/kafka/server.properties
+/usr/bin/schema-registry-start /etc/schema-registry/schema-registry.properties
+
+#reset kafka and hdfs
+/usr/bin/kafka-topics --zookeeper localhost:2181 --delete --topic review2
+/home/hadoop*/bin/hadoop fs -rm -f -r /topics/review2/*
+
+#run kafka hdfs/hive sink connector
+/usr/bin/connect-standalone /etc/schema-registry/connect-avro-standalone.properties \
+/etc/kafka-connect-hdfs/quickstart-hdfs.properties
+
+cd /home/ec2-user/webScrape/review1
+
+#run crawler
+scrapy crawl reviews
+
+#export records in plain text format
+hive> 
+set hive.cli.print.header=true;
+insert overwrite local directory '/home/ec2-user/hdfs-data1/reviews'
+  row format delimited fields terminated by ','
+  select * from review2;
+
+describe review2;
+col_name        data_type       comment
+rating                  string
+title                   string
+date                    string
+text                    string
+id                      int
+author                  string
+partition               string
+
+# Partition Information
+# col_name              data_type               comment
+
+partition               string

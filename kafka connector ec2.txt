@@ -1,0 +1,106 @@
+//install and run kafka twitter source connector
+git clone https://github.com/jcustenborder/kafka-connect-twitter.git
+
+cd kafka-connect-twitter
+
+//maven build call
+mvn clean package
+
+vi ~/.bashrc
+...
+export CLASSPATH="/home/ec2-user/kafka-connect-twitter/target/kafka-connect-twitter-0.2-SNAPSHOT-jar-with-dependencies.jar"
+...
+source ~/.bashrc
+
+//create new properties file
+vi TwitterSourceConnector.properties
+...
+name=connector1
+tasks.max=1
+connector.class=com.github.jcustenborder.kafka.connect.twitter.TwitterSourceConnector
+
+twitter.oauth.accessTokenSecret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+process.deletes=FALSE
+filter.keywords=kindle, "amazon kindle", "kindle paperwhite"
+kafka.status.topic=tweet1
+kafka.delete.topic=tweet1
+twitter.oauth.consumerSecret=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+twitter.oauth.accessToken=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+twitter.oauth.consumerKey=xxxxxxxxxxxxxxxxxxxxx
+...
+
+mkdir /etc/kafka-connect-twitter
+
+mv TwitterSourceConnector.properties /etc/kafka-connect-twitter/TwitterSourceConnector.properties
+
+//Kafka hdfs/hive sink connector setup
+vi /etc/kafka-connect-hdfs/quickstart-hdfs.properties
+...
+name=hdfs-sink
+connector.class=io.confluent.connect.hdfs.HdfsSinkConnector
+format.class=io.confluent.connect.hdfs.parquet.ParquetFormat
+#partitioner.class=io.confluent.connect.hdfs.partitioner.HourlyPartitioner
+tasks.max=1
+topics=tweet1
+hdfs.url=hdfs://localhost:9000
+flush.size=100
+hive.integration=true
+hive.metastore.uris=thrift://localhost:9083
+schema.compatibility=BACKWARD
+...
+
+//Application execution
+su hdp
+/home/hadoop*/sbin/start-dfs.sh
+exit
+nohup /home/ec2-user/apache-hive-2.1.1-bin/bin/hive --service metastore &
+/usr/bin/kafka-server-start /etc/kafka/server.properties
+/usr/bin/schema-registry-start /etc/schema-registry/schema-registry.properties
+
+//reset kafka and hdfs
+/usr/bin/kafka-topics --zookeeper localhost:2181 --delete --topic tweet1
+/home/hadoop*/bin/hadoop fs -rm -f -r /topics/tweet1/*
+
+//run kafka twitter source connector and hdfs/hive sink connector
+/usr/bin/connect-standalone /etc/schema-registry/connect-avro-standalone.properties \
+/etc/kafka-connect-twitter/TwitterSourceConnector.properties \
+/etc/kafka-connect-hdfs/quickstart-hdfs.properties
+
+//export records in plain text format
+hive> 
+set hive.cli.print.header=true;
+insert overwrite local directory '/home/ec2-user/hdfs-data1/twitter'
+  row format delimited fields terminated by ','
+  select * from tweet1;
+
+describe tweet1;
+col_name        data_type       comment
+createdat               bigint                  Return the created_at
+id                      bigint                  Returns the id of the status
+text                    string                  Returns the text of the status
+source                  string                  Returns the source
+truncated               boolean                 Test if the status is truncated
+inreplytostatusid       bigint                  Returns the in_reply_tostatus_id
+inreplytouserid         bigint                  Returns the in_reply_user_id
+inreplytoscreenname     string                  Returns the in_reply_to_screen_name
+geolocation             struct<Latitude:double,Longitude:double>        Returns The location that this tweet refers to if available.
+place                   struct<Name:string,StreetAddress:string,CountryCode:string,Id:string,Country:string,PlaceType:string,URL:string,FullName:string>        Returns the place attached to this status
+favorited               boolean                 Test if the status is favorited
+retweeted               boolean                 Test if the status is retweeted
+favoritecount           int                     Indicates approximately how many times this Tweet has been "favorited" by Twitter users.
+user                    struct<Id:bigint,Name:string,ScreenName:string,Location:string,Description:string,ContributorsEnabled:boolean,ProfileImageURL:string,BiggerProfileImageURL:string,MiniProfileImageURL:string,OriginalProfileImageURL:string,ProfileImageURLHttps:string,BiggerProfileImageURLHttps:string,MiniProfileImageURLHttps:string,OriginalProfileImageURLHttps:string,DefaultProfileImage:boolean,URL:string,Protected:boolean,FollowersCount:int,ProfileBackgroundColor:string,ProfileTextColor:string,ProfileLinkColor:string,ProfileSidebarFillColor:string,ProfileSidebarBorderColor:string,ProfileUseBackgroundImage:boolean,DefaultProfile:boolean,ShowAllInlineMedia:boolean,FriendsCount:int,CreatedAt:bigint,FavouritesCount:int,UtcOffset:int,TimeZone:string,ProfileBackgroundImageURL:string,ProfileBackgroundImageUrlHttps:string,ProfileBannerURL:string,ProfileBannerRetinaURL:string,ProfileBannerIPadURL:string,ProfileBannerIPadRetinaURL:string,ProfileBannerMobileURL:string,ProfileBannerMobileRetinaURL:string,ProfileBackgroundTiled:boolean,Lang:string,StatusesCount:int,GeoEnabled:boolean,Verified:boolean,Translator:boolean,ListedCount:int,FollowRequestSent:boolean,WithheldInCountries:array<string>>   Return the user associated with the status.
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        This can be null if the instance is from User.getStatus().
+retweet                 boolean
+contributors            array<bigint>           Returns an array of contributors, or null if no contributor is associated with this status.
+retweetcount            int                     Returns the number of times this tweet has been retweeted, or -1 when the tweet was created before this feature was enabled.
+retweetedbyme           boolean
+currentuserretweetid    bigint                  Returns the authenticating user's retweet's id of this tweet, or -1L when the tweet was created before this feature was enabled.
+possiblysensitive       boolean
+lang                    string                  Returns the lang of the status text if available.
+withheldincountries     array<string>           Returns the list of country codes where the tweet is withheld
+partition               string
+
+# Partition Information
+# col_name              data_type               comment
+
+partition               string

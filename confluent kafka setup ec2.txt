@@ -1,0 +1,73 @@
+sudo rpm --import http://packages.confluent.io/rpm/3.2/archive.key
+
+$ vi confluent.repo
+[Confluent.dist]
+name=Confluent repository (dist)
+baseurl=http://packages.confluent.io/rpm/3.2/7
+gpgcheck=1
+gpgkey=http://packages.confluent.io/rpm/3.2/archive.key
+enabled=1
+
+[Confluent]
+name=Confluent repository
+baseurl=http://packages.confluent.io/rpm/3.2
+gpgcheck=1
+gpgkey=http://packages.confluent.io/rpm/3.2/archive.key
+enabled=1
+
+$ sudo mv confluent.repo /etc/yum.repos.d
+sudo yum clean all
+sudo yum install confluent-platform-oss-2.11
+
+sudo su
+#start zookeeper
+/usr/bin/zookeeper-server-start /etc/kafka/zookeeper.properties
+
+#optional: for low RAM machines only
+export KAFKA_HEAP_OPTS="-Xmx256M -Xms256M"
+
+#start kafka server
+/usr/bin/kafka-server-start /etc/kafka/server.properties
+
+#start confluent schema registry
+/usr/bin/schema-registry-start /etc/schema-registry/schema-registry.properties
+
+#if output is required in S3 (optional)
+vi /etc/kafka-connect-s3/quickstart-s3.properties
+...
+topics=test
+s3.region=us-east-2
+s3.bucket.name=twitter-data1
+...
+
+#for non-avro/string messages (optional)
+vi /etc/schema-registry/connect-avro-standalone.properties
+...
+key.converter = org.apache.kafka.connect.storage.StringConverter
+value.converter = org.apache.kafka.connect.storage.StringConverter
+...
+
+#execution
+/usr/bin/connect-standalone /etc/schema-registry/connect-avro-standalone.properties /etc/kafka-connect-s3/quickstart-s3.properties
+/usr/bin/kafka-console-producer --broker-list localhost:9092 --topic test
+
+#start kafka server
+vi /etc/kafka/server.properties
+...
+delete.topic.enable=true
+...
+
+#reset kafka topic stream
+/usr/bin/kafka-topics --zookeeper localhost:2181 --list
+/usr/bin/kafka-topics --zookeeper localhost:2181 --delete --topic test
+
+#kafka avro producer/consumer test
+/usr/bin/kafka-avro-console-producer --broker-list localhost:9092 --topic test --property value.schema='{"type":"record","name":"myrecord","fields":[{"name":"f1","type":"string"}]}'
+{"f1": "value1"}
+{"f1": "value2"}
+{"f1": "value3"}
+/usr/bin/kafka-avro-console-consumer --topic test ----bootstrap-server localhost:9092 --from-beginning
+
+#kafka non-avro producer/consumer test
+/usr/bin/kafka-console-producer --broker-list localhost:9092 --topic test
+/usr/bin/kafka-console-consumer --topic test --bootstrap-server localhost:9092 --from-beginning

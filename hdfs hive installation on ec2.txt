@@ -1,0 +1,104 @@
+sudo su
+
+yum install java-1.8.0-openjdk-devel		//update java to 1.8
+/usr/sbin/alternatives --config java
+/usr/sbin/alternatives --config javac
+
+wget http://mirror.reverse.net/pub/apache/hadoop/common/hadoop-2.8.0/hadoop-2.8.0.tar.gz
+tar zxvf hadoop-2.8.0.tar.gz
+useradd -s /bin/bash -m hdp			//s=shell; m=create home dir; 'hdp' is username
+chown -R hdp.hdp /home/hadoop-2.8.0		//R=recursive; (user, grp) <- ('hdp', 'hdp')
+
+sudo su hdp					//start session as user 'hdp'
+vi ~/.ssh/id_dsa				//paste aws pem content to this file
+chmod og-rw ~/.ssh/id_dsa			//remove rw access for other users and grp
+Now load aws pem file in PuttyGen and note the Public key to be pasted into a new Auth keys file
+vi ~/.ssh/authorized_keys
+<paste content from PuttyGen>
+chmod og-rw ~/.ssh/authorized_keys		//remove rw access for other users and grp
+ssh localhost					//test passphraseless ssh access
+
+//Open below ports using aws security group 
+Port	Description
+50070	UI admin tool for the NameNode
+50030	UI admin tool for the JobTracker
+50075	File browser
+
+df -h						//file system statistics, check free disk space
+
+cd /home/hadoop-2.8.0, and fill below sections
+
+etc/hadoop/core-site.xml:
+<configuration>
+     <property>
+         <name>fs.default.name</name>
+         <value>hdfs://localhost:9000</value>
+     </property>
+</configuration>
+
+//set rep factor for a file => hadoop fs -setrep [-w] <rep> <file-path>
+//set block size for a file => hadoop fs -Ddfs.blocksize=1048576 -put /home/ec2-user/test-file.txt /testfile
+//default minimum block size (dfs.namenode.fs-limits.min-block-size) is 1M
+etc/hadoop/hdfs-site.xml:
+<configuration>
+     <property>
+         <name>dfs.replication</name>
+         <value>1</value>
+     </property>
+     <property>
+         <name>dfs.namenode.safemode.threshold-pct</name>
+         <value>0.99</value>
+     </property>
+</configuration>
+
+etc/hadoop/mapred-site.xml (rename template file): 
+<configuration>
+     <property>
+         <name>mapred.job.tracker</name>
+         <value>localhost:9001</value>
+     </property>
+</configuration>
+
+rm -rf /tmp/*						//force delete tmp dir content recursively
+ps aux | grep java					//find program calls using jvm
+kill <pid>						//kill orphan processes if required
+/home/hadoop*/bin/hadoop namenode -format		//format hdfs for 1st time use
+
+/home/hadoop*/sbin/start-dfs.sh
+/home/hadoop*/sbin/start-yarn.sh (optional)
+jps
+/home/hadoop*/sbin/stop-dfs.sh
+/home/hadoop*/sbin/stop-yarn.sh (optional)
+exit
+
+wget http://www.namesdir.com/mirrors/apache/hive/hive-2.1.1/apache-hive-2.1.1-bin.tar.gz
+tar zxvf apache-hive*
+
+vi ~/.bashrc
+...
+export HADOOP_HOME=/home/hadoop-2.8.0			//in apache-hive-2.1.1-bin/conf/hive-env.sh
+export HIVE_HOME=/home/ec2-user/apache-hive-2.1.1-bin	//optional
+PATH=$PATH:$HIVE_HOME/bin
+export PATH
+...
+source ~/.bashrc
+
+sudo su hdp
+/home/hadoop*/bin/hadoop fs -mkdir -p /usr/hive/warehouse
+/home/hadoop*/bin/hadoop fs -mkdir /tmp
+/home/hadoop*/bin/hadoop fs -chmod go+wx /
+/home/hadoop*/bin/hadoop fs -chmod go+rwx /usr/hive/warehouse
+/home/hadoop*/bin/hadoop fs -chmod go+wx /tmp
+
+rm -rf metastore_db				//for 'version not found in metastore' metaexception
+apache-hive-2.1.1-bin/bin/schematool -dbType derby -initSchema
+apache-hive-2.1.1-bin/bin/hive
+
+create database sample;
+use sample;
+create table product(product int, productname string, price float);
+INSERT INTO TABLE product VALUES (1,'Hadoop',550.11);
+select * from product;
+quit;
+
+Note: if conf/hive-site.xml is enabled, additional settings may be required
